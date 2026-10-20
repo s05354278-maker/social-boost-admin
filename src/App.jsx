@@ -601,7 +601,17 @@ function SocialBoostAdmin({ onLogout }) {
             <TransactionsPage data={currentData} onRefresh={() => refreshSection("transactions", API.transactions)} />
           )}
           {page === "orders" && (
-            <OrdersPage data={currentData} onRefresh={() => refreshSection("orders", API.orders)} />
+            <OrdersPage
+              data={currentData}
+              onRefresh={() => refreshSection("orders", API.orders)}
+              notify={notify}
+              onOrderUpdated={(updatedOrder) => {
+                setData((cur) => ({
+                  ...cur,
+                  orders: (cur.orders || []).map((o) => (o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o))
+                }));
+              }}
+            />
           )}
           {page === "services" && (
             <ServicesPage data={currentData} onRefresh={() => refreshSection("services", API.services)} onOpen={(service) => setDrawer({ type: "service", service })} notify={notify} />
@@ -641,7 +651,19 @@ function SocialBoostAdmin({ onLogout }) {
         ) : null}
         {drawer?.type === "payment" ? <PaymentDrawer payment={drawer.payment} notify={notify} /> : null}
         {drawer?.type === "service" ? (drawer.service.__layoutEditor ? <ServiceLayoutDrawer service={drawer.service} notify={notify} /> : <ServiceDrawer service={drawer.service} notify={notify} />) : null}
-        {drawer?.type === "content" ? <ContentDrawer item={drawer.item} notify={notify} /> : null}
+        {drawer?.type === "content" ? (
+          <ContentDrawer
+            item={drawer.item}
+            notify={notify}
+            onContentUpdated={(updated) => {
+              setData((cur) => ({
+                ...cur,
+                content: (cur.content || []).map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+              }));
+              setDrawer((cur) => (cur?.type === "content" && cur.item.id === updated.id ? { ...cur, item: { ...cur.item, ...updated } } : cur));
+            }}
+          />
+        ) : null}
       </Drawer>
 
       <Toast toast={toast} onClose={() => setToast(null)} />
@@ -899,13 +921,26 @@ function TransactionsPage({ data, onRefresh }) {
   );
 }
 
-function OrdersPage({ data, onRefresh }) {
+function OrdersPage({ data, onRefresh, notify, onOrderUpdated }) {
   const [search, setSearch] = useState("");
   const safeOrders = Array.isArray(data) ? data : [];
   
   const filtered = safeOrders.filter((o) =>
     `${o.id} ${o.providerId} ${o.user} ${o.email || ""} ${o.service} ${o.created} ${o.status} ${o.link}`.toLowerCase().includes(search.toLowerCase())
   );
+
+  async function handleStatusChange(orderId, newStatus) {
+    try {
+      await apiFetch(API.order(orderId), {
+        method: "PUT",
+        body: JSON.stringify({ status: newStatus })
+      });
+      if (notify) notify("Order updated", `Order ${orderId} status set to ${newStatus}.`);
+      if (onOrderUpdated) onOrderUpdated({ id: orderId, status: newStatus });
+    } catch (err) {
+      if (notify) notify("Update failed", err.message || "Could not update order status.");
+    }
+  }
 
   return (
     <>
@@ -959,7 +994,7 @@ function OrdersPage({ data, onRefresh }) {
         <div className="table-head"><span>{filtered.length} matching orders</span><span>Customer order ID + provider order ID</span></div>
         <table>
           <thead>
-            <tr><th>Order</th><th>Customer</th><th>Service</th><th>Quantity</th><th>Charge</th><th>Status</th><th>Provider ID</th></tr>
+            <tr><th>Order</th><th>Customer</th><th>Service</th><th>Quantity</th><th>Charge</th><th>Status</th><th>Provider ID</th><th>Change Status</th></tr>
           </thead>
           <tbody>
             {filtered.map((o) => (
@@ -971,6 +1006,19 @@ function OrdersPage({ data, onRefresh }) {
                 <td>{currency(o.charge)}</td>
                 <td><StatusPill status={o.status} /></td>
                 <td><span className="provider-id">{o.providerId || "Manual"}</span></td>
+                <td>
+                  <select
+                    value={o.status || "Pending"}
+                    onChange={(e) => handleStatusChange(o.id, e.target.value)}
+                    style={{ fontSize: 10, padding: "2px 6px", borderRadius: 6, fontWeight: 700, width: "auto" }}
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Processing">Processing</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Partial">Partial</option>
+                    <option value="Failed">Failed</option>
+                  </select>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1636,7 +1684,20 @@ function ContentPage({ data, onRefresh, onOpen, notify }) {
       {tab === "reviews" && <CollectionEditor title="Creator reviews" route={API.reviews} items={reviews} setItems={setReviews} fields={[["name", "Name"], ["role", "Role"], ["avatar", "Avatar URL"], ["review", "Review"], ["rating", "Rating"]]} onSave={(item) => save(String(item.id || "").startsWith("draft_") ? API.reviews : API.review(item.id), item, "Review")} busy={busy} notify={notify} />}
       {tab === "faq" && <CollectionEditor title="FAQ" route={API.faq} items={faq} setItems={setFaq} fields={[["question", "Question"], ["answer", "Answer"]]} onSave={(item) => save(String(item.id || "").startsWith("draft_") ? API.faq : API.faqItem(item.id), item, "FAQ")} busy={busy} notify={notify} />}
       {tab === "primary" && <EditorPanel title="Primary / blank content slot" route={API.primaryContent} fields={[["type", "Type: video / text / image / blank"], ["src", "Source URL"], ["title", "Title"], ["text", "Text / body"]]} value={primary} setValue={setPrimary} onSave={() => save(API.primaryContent, primary, "Primary content")} busy={busy} textareaKeys={["text"]} fullWidthKeys={["title"]} />}
-      {tab === "config" && <ConfigEditor config={config} setConfig={setConfig} onSave={() => save(API.config, config, "App configuration")} busy={busy} />}
+      {tab === "config" && (
+        <ConfigEditor
+          config={config}
+          setConfig={setConfig}
+          onSave={() => {
+            const cleanConfig = { ...config };
+            delete cleanConfig.googlePlayActive;
+            delete cleanConfig._id;
+            delete cleanConfig.id;
+            return save(API.config, cleanConfig, "App configuration");
+          }}
+          busy={busy}
+        />
+      )}
 
       <div className="notice-strip light"><div className="notice-icon"><Sparkles size={17} /></div><div><strong>Dynamic fallback preserved</strong><span>The customer app already supports text, image, video and safe blank fallback for the primary content slot. Admin changes only change backend responses.</span></div></div>
     </>
@@ -2383,7 +2444,51 @@ function PaymentDrawer({ payment, notify }) {
 
 function Timeline({ label, done }) { return <div className={cn("timeline-row", done && "done")}><span>{done ? <CheckCircle2 size={16} /> : <Activity size={16} />}</span><strong>{label}</strong></div>; }
 function ServiceDrawer({ service, notify }) { return <div className="drawer-stack"><div className="drawer-banner"><Boxes size={19} /><div><strong>{service.name}</strong><span>{service.category} · RF mapping {service.rfId}</span></div></div><label>Customer price<input defaultValue={service.price} /></label><label>Minimum quantity<input defaultValue={service.min} /></label><label>Maximum quantity<input defaultValue={service.max} /></label><label>Status<select defaultValue={service.status}><option>Active</option><option>Paused</option></select></label><button className="full-button" onClick={() => notify("Service block", `PUT /api/admin/services/${service.id} is ready to wire.`)}><CheckCircle2 size={15} /> Save service</button></div>; }
-function ContentDrawer({ item, notify }) { return <div className="drawer-stack"><div className="drawer-banner"><Palette size={19} /><div><strong>{item.title}</strong><span>{item.type} · {item.id}</span></div></div><label>Block title<input defaultValue={item.title} /></label><label>Content type<select defaultValue={item.type}><option>Text</option><option>Banner</option><option>Video</option><option>Dynamic</option><option>Image</option></select></label><label>Content<textarea rows="7" defaultValue={item.type === "Video" ? "https://cdn.example.com/video.mp4" : "Dynamic content controlled by your backend."} /></label><div className="content-rule"><Cloud size={15} /><span>App route: GET /api/content or GET /api/config → render block by type.</span></div><button className="full-button" onClick={() => notify("Content block", `PUT /api/admin/content/${item.id} is ready to wire.`)}><CheckCircle2 size={15} /> Publish changes</button></div>; }
+function ContentDrawer({ item, notify, onContentUpdated }) {
+  const [title, setTitle] = useState(item?.title || "");
+  const [type, setType] = useState(item?.type || "Text");
+  const [content, setContent] = useState(item?.content || item?.src || "");
+  const [status, setStatus] = useState(item?.status || "Published");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setTitle(item?.title || "");
+    setType(item?.type || "Text");
+    setContent(item?.content || item?.src || "");
+    setStatus(item?.status || "Published");
+  }, [item]);
+
+  async function handleSave() {
+    setBusy(true);
+    try {
+      const res = await apiFetch(API.contentItem(item.id), {
+        method: "PUT",
+        body: JSON.stringify({ title, type, status, content, src: content })
+      });
+      notify("Content block updated", `${title} saved through the backend.`);
+      if (onContentUpdated) onContentUpdated(res?.item || { ...item, title, type, status, content, src: content, updated: "Just now" });
+    } catch (e) {
+      notify("Save failed", e.message || "Could not save content block.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="drawer-stack">
+      <div className="drawer-banner"><Palette size={19} /><div><strong>{title || item.title}</strong><span>{type} · {item.id}</span></div></div>
+      <label>Block title<input value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+      <label>Content type<select value={type} onChange={(e) => setType(e.target.value)}><option>Text</option><option>Banner</option><option>Video</option><option>Dynamic</option><option>Image</option></select></label>
+      <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}><option>Published</option><option>Draft</option><option>Archived</option></select></label>
+      <label>Content / Media URL<textarea rows="7" value={content} onChange={(e) => setContent(e.target.value)} /></label>
+      <div className="content-rule"><Cloud size={15} /><span>App route: GET /api/content → customer app consumes published blocks.</span></div>
+      <button className="full-button" onClick={handleSave} disabled={busy}>
+        {busy ? <RefreshCw className="spin" size={15} /> : <CheckCircle2 size={15} />}
+        Publish changes
+      </button>
+    </div>
+  );
+}
 
 class SocialBoostAdminErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
