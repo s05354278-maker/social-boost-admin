@@ -336,6 +336,56 @@ function StatusPill({ status }) {
   return <span className={`status-pill ${tone}`}><span className="dot" />{safeStatus}</span>;
 }
 
+function PaymentMethodPill({ method }) {
+  const m = String(method || "Razorpay").trim();
+  const lower = m.toLowerCase();
+  let tone = "slate";
+  let label = m;
+
+  if (lower.includes("google") || lower.includes("play")) {
+    tone = "green";
+    label = "Google Play";
+  } else if (lower.includes("upi")) {
+    tone = "blue";
+    label = "UPI";
+  } else if (lower.includes("card")) {
+    tone = "purple";
+    label = "Card";
+  } else if (lower.includes("razorpay")) {
+    tone = "slate";
+    label = "Razorpay";
+  }
+
+  return (
+    <span
+      className={`status-pill ${tone}`}
+      style={
+        lower.includes("google") || lower.includes("play")
+          ? { background: "#ecfdf5", color: "#047857", border: "1px solid #a7f3d0", fontWeight: 700 }
+          : lower.includes("upi")
+          ? { background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", fontWeight: 700 }
+          : lower.includes("card")
+          ? { background: "#faf5ff", color: "#7e22ce", border: "1px solid #e9d5ff", fontWeight: 700 }
+          : { fontWeight: 700 }
+      }
+    >
+      <span
+        className="dot"
+        style={
+          lower.includes("google") || lower.includes("play")
+            ? { background: "#10b981" }
+            : lower.includes("upi")
+            ? { background: "#3b82f6" }
+            : lower.includes("card")
+            ? { background: "#a855f7" }
+            : {}
+        }
+      />
+      {label}
+    </span>
+  );
+}
+
 function MetricCard({ icon: Icon, label, value, detail, trend, tone = "blue" }) {
   return (
     <div className="metric-card">
@@ -747,7 +797,7 @@ function PaymentsPage({ data, onRefresh, onOpen, notify }) {
                 <td><strong>{p.id}</strong><span className="muted-line">Date/Time: {p.time}</span></td>
                 <td><strong>{p.user}</strong>{p.email && <><br /><span style={{ fontSize: 9, color: "#94a3b8" }}>{maskEmail(p.email)}</span></>}</td>
                 <td><strong>{currency(p.amount)}</strong></td>
-                <td>{p.method}</td>
+                <td><PaymentMethodPill method={p.method} /></td>
                 <td><StatusPill status={p.status} /></td>
                 <td><StatusPill status={p.credit === "Completed" ? "Completed" : p.credit === "Waiting" ? "Waiting" : "Not sent"} /></td>
                 <td><button className="text-button" onClick={() => onOpen(p)}>Details</button></td>
@@ -1915,6 +1965,7 @@ function SettingsPage({ notify }) {
   const [env, setEnv] = useState("production");
   const [role, setRole] = useState("super_admin");
   const [busy, setBusy] = useState(false);
+  const [googlePlayActive, setGooglePlayActive] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -1930,6 +1981,9 @@ function SettingsPage({ notify }) {
             ...(c.maintenance !== undefined ? { maintenance: Boolean(c.maintenance) } : {}),
             ...(c.notifications !== undefined ? { notifications: Boolean(c.notifications) } : {})
           }));
+        }
+        if (alive && res && res.googlePlayActive !== undefined) {
+          setGooglePlayActive(Boolean(res.googlePlayActive));
         }
       })
       .catch(() => {});
@@ -1974,6 +2028,16 @@ function SettingsPage({ notify }) {
             <label><span>Environment</span><select value={env} onChange={(e) => setEnv(e.target.value)}><option value="production">Production</option><option value="staging">Staging</option><option value="development">Development</option></select></label>
             {/* NOTE: Role selector UI is display-only. The server cryptographically validates and enforces roles via ADMIN_JWT_SECRET. */}
             <label><span>Admin role</span><select value={role} onChange={(e) => setRole(e.target.value)}><option value="super_admin">Super Admin</option><option value="finance">Finance</option><option value="support">Support</option><option value="content">Content</option></select></label>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "var(--subtle, #f8fafc)", borderRadius: 8, border: "1px solid var(--line, #e2e8f0)", marginTop: 6 }}>
+              <div>
+                <strong style={{ display: "block", fontSize: 11, color: "#1e293b" }}>Google Play Billing</strong>
+                <span style={{ display: "block", fontSize: 10, color: "#64748b" }}>Service Account Credentials</span>
+              </div>
+              <span className={`status-pill ${googlePlayActive ? "green" : "amber"}`}>
+                <span className="dot" />
+                {googlePlayActive ? "Active" : "Not configured"}
+              </span>
+            </div>
           </div>
           <div className="security-note"><Lock size={16} /><span>Secret keys belong in server environment variables, never here.</span></div>
         </div>
@@ -2293,8 +2357,14 @@ function PaymentDrawer({ payment, notify }) {
 
       <div className="detail-grid">
         <div><span>Transaction</span><strong>{currentPayment.id}</strong></div>
-        <div><span>Method</span><strong>{currentPayment.method}</strong></div>
+        <div><span>Method</span><strong style={{ display: 'inline-flex', alignItems: 'center' }}><PaymentMethodPill method={currentPayment.method} /></strong></div>
         <div><span>Credit state</span><strong>{currentPayment.credit}</strong></div>
+        {(currentPayment.orderId || (currentPayment.method && String(currentPayment.method).toLowerCase().includes('google'))) && (
+          <div><span>Order ID</span><strong style={{ wordBreak: 'break-all', fontSize: 11 }}>{currentPayment.orderId || 'N/A'}</strong></div>
+        )}
+        {(currentPayment.purchaseToken || (currentPayment.method && String(currentPayment.method).toLowerCase().includes('google'))) && (
+          <div><span>Purchase token</span><strong style={{ wordBreak: 'break-all', fontSize: 10, color: '#475569' }}>{currentPayment.purchaseToken || 'N/A'}</strong></div>
+        )}
       </div>
 
       <div className="timeline">
