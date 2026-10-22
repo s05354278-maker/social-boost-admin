@@ -1,16 +1,3 @@
-import * as Sentry from "@sentry/react";
-
-Sentry.init({
-  dsn: "https://c526947970d587f674d14c647d7f60fd@o4512215824924672.ingest.us.sentry.io/4512215841832960",
-  integrations: [
-    Sentry.browserTracingIntegration(),
-    Sentry.replayIntegration(),
-  ],
-  tracesSampleRate: 1.0,
-  replaysSessionSampleRate: 0.0,
-  replaysOnErrorSampleRate: 0.0,
-});
-
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -190,37 +177,17 @@ const API = {
 
 const demoData = {
   dashboard: {
-    revenueToday: 184520,
-    revenueMonth: 4285900,
-    paymentsToday: 486,
-    activeOrders: 327,
-    completedOrders: 8924,
-    users: 18260,
+    revenueToday: 0,
+    revenueMonth: 0,
+    paymentsToday: 0,
+    activeOrders: 0,
+    completedOrders: 0,
+    users: 0,
   },
-  users: [
-    { id: "U-10241", name: "Arjun Kumar", email: "arjun@example.com", balance: 1280, orders: 19, status: "Active", joined: "28 Sep 2026" },
-    { id: "U-10240", name: "Nikhil R", email: "nikhil@example.com", balance: 0, orders: 8, status: "Active", joined: "28 Sep 2026" },
-    { id: "U-10239", name: "Sneha M", email: "sneha@example.com", balance: 520, orders: 13, status: "Active", joined: "27 Sep 2026" },
-    { id: "U-10238", name: "Ravi Teja", email: "ravi@example.com", balance: 340, orders: 4, status: "Blocked", joined: "27 Sep 2026" },
-  ],
-  payments: [
-    { id: "TXN-90451", user: "Arjun Kumar", amount: 500, method: "UPI", status: "Success", time: "09:41 PM", credit: "Completed" },
-    { id: "TXN-90450", user: "Nikhil R", amount: 1000, method: "UPI", status: "Success", time: "09:37 PM", credit: "Completed" },
-    { id: "TXN-90449", user: "Sneha M", amount: 250, method: "Card", status: "Pending", time: "09:34 PM", credit: "Waiting" },
-    { id: "TXN-90448", user: "Ravi Teja", amount: 500, method: "UPI", status: "Failed", time: "09:30 PM", credit: "Not sent" },
-  ],
-  transactions: [
-    { id: "LED-44092", type: "Payment", user: "Arjun Kumar", amount: 500, direction: "in", status: "Success", created: "21:41" },
-    { id: "LED-44091", type: "Red Famosa Credit", user: "Arjun Kumar", amount: 500, direction: "out", status: "Completed", created: "21:42" },
-    { id: "LED-44090", type: "Order Debit", user: "Sneha M", amount: 125, direction: "out", status: "Completed", created: "21:29" },
-    { id: "LED-44089", type: "Payment", user: "Nikhil R", amount: 1000, direction: "in", status: "Success", created: "21:37" },
-  ],
-  orders: [
-    { id: "SB-74820", providerId: "RF-23501", user: "Arjun Kumar", service: "Instagram Followers", qty: 1000, status: "Processing", charge: 420, created: "21:42" },
-    { id: "SB-74819", providerId: "RF-23500", user: "Nikhil R", service: "YouTube Views", qty: 5000, status: "Pending", charge: 310, created: "21:39" },
-    { id: "SB-74818", providerId: "RF-23499", user: "Sneha M", service: "Telegram Members", qty: 2000, status: "Completed", charge: 550, created: "21:21" },
-    { id: "SB-74817", providerId: "RF-23498", user: "Arjun Kumar", service: "Facebook Page Likes", qty: 1000, status: "Partial", charge: 190, created: "20:58" },
-  ],
+  users: [],
+  payments: [],
+  transactions: [],
+  orders: [],
   services: [
     { id: "youtube", name: "Video Discovery", category: "YouTube", displayLayout: "row", status: "Active", variants: [] },
     { id: "instagram", name: "Short-Form Social Reach", category: "Instagram", displayLayout: "row", status: "Active", variants: [] },
