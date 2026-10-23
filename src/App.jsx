@@ -175,7 +175,7 @@ const API = {
   serviceSubVariant: (serviceId, variantId, subVariantId) => `/admin/services/${encodeURIComponent(serviceId)}/variants/${encodeURIComponent(variantId)}/sub-variants/${encodeURIComponent(subVariantId)}`,
 };
 
-const demoData = {
+const initialData = {
   dashboard: {
     revenueToday: 0,
     revenueMonth: 0,
@@ -437,8 +437,8 @@ function SocialBoostAdmin({ onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
-  const [data, setData] = useState(demoData);
-  const [backendMode, setBackendMode] = useState("demo");
+  const [data, setData] = useState(initialData);
+  const [backendMode, setBackendMode] = useState("connecting");
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState(null);
@@ -457,7 +457,7 @@ function SocialBoostAdmin({ onLogout }) {
           setBackendMode("live");
         }
       } catch {
-        if (!cancelled) setBackendMode("demo");
+        if (!cancelled) setBackendMode("offline");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -482,7 +482,7 @@ function SocialBoostAdmin({ onLogout }) {
       setBackendMode("live");
       notify("Backend connected", `${section} data loaded from your API.`);
     } catch (error) {
-      notify("Demo data kept", error.message || "Backend is not reachable yet.");
+      notify("Notice", error.message || "Backend is not reachable yet.");
     }
   }
 
@@ -531,7 +531,7 @@ function SocialBoostAdmin({ onLogout }) {
         </nav>
 
         <div className="sidebar-footer">
-          {sidebarOpen ? <div className="health-mini"><span className="live-dot" /><div><strong>System healthy</strong><span>{backendMode === "live" ? "Backend connected" : "Demo / offline mode"}</span></div></div> : null}
+          {sidebarOpen ? <div className="health-mini"><span className="live-dot" /><div><strong>System healthy</strong><span>{backendMode === "live" ? "Backend connected" : (backendMode === "connecting" ? "Connecting..." : "Offline mode")}</span></div></div> : null}
           <button className="nav-item" onClick={() => {
             secureAdminStorage.removeItem("socialboost_admin_token");
             if (onLogout) onLogout();
@@ -548,7 +548,7 @@ function SocialBoostAdmin({ onLogout }) {
             <div className="breadcrumbs"><span>Admin</span><span>/</span><strong>{pageMeta.label}</strong></div>
           </div>
           <div className="topbar-right">
-            <div className="connection-chip"><span className={cn("dot", backendMode === "live" ? "green" : "amber")} />{backendMode === "live" ? "Backend connected" : "Demo mode"}</div>
+            <div className="connection-chip"><span className={cn("dot", backendMode === "live" ? "green" : (backendMode === "connecting" ? "amber" : "red"))} />{backendMode === "live" ? "Backend connected" : (backendMode === "connecting" ? "Connecting..." : "Offline")}</div>
             <button className="icon-button"><Bell size={18} /></button>
             <div className="admin-avatar">SA</div>
           </div>
@@ -1098,7 +1098,7 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
     } catch (error) {
       const fallback = Array.isArray(service.variants) ? service.variants : [];
       setVariants(fallback);
-      notify("Demo fallback", error.message || "Variants endpoint not connected yet.");
+      notify("Notice", error.message || "Variants endpoint not connected yet.");
     }
   }
 
@@ -1112,7 +1112,7 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
     } catch (error) {
       const fallback = variant.tiers ? [...(variant.tiers.hq || []), ...(variant.tiers.normal || [])] : [];
       setSubVariants(fallback);
-      notify("Demo fallback", error.message || "Sub-variants endpoint not connected yet.");
+      notify("Notice", error.message || "Sub-variants endpoint not connected yet.");
     }
   }
 
@@ -1581,9 +1581,9 @@ function ContentPage({ data, onRefresh, onOpen, notify }) {
   const [tab, setTab] = useState("content");
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState({ tag: "Limited-time · ends in 24h", title: "Get 25% bonus points today", subtitle: "Extra credit applied on any pack", buttonText: "Add points", buttonLink: "points" });
-  const [packages, setPackages] = useState(demoData.packages || []);
-  const [reviews, setReviews] = useState(demoData.reviews || []);
-  const [faq, setFaq] = useState(demoData.faq || []);
+  const [packages, setPackages] = useState(initialData.packages || []);
+  const [reviews, setReviews] = useState(initialData.reviews || []);
+  const [faq, setFaq] = useState(initialData.faq || []);
   const [primary, setPrimary] = useState({ type: "video", src: "", title: "", text: "" });
   const [config, setConfig] = useState({ supportPhone: "", supportEmail: "", issuePhone: "", issueEmail: "", shareUrl: "", privacyText: "", termsText: "", levelPerks: [], registration: true, payments: true, orders: true, maintenance: false, notifications: true });
 
@@ -2693,6 +2693,7 @@ button, input, select, textarea { font: inherit; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: #9ca3af; }
 .dot.green { background: #22c55e; }
 .dot.amber { background: #f59e0b; }
+.dot.red { background: #ef4444; }
 .icon-button { border: 1px solid var(--line); background: #fff; width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; color: #606b7f; cursor: pointer; }
 .icon-button:hover { background: #f7f8fb; }
 .admin-avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: #171f2f; color: #fff; font-size: 10px; font-weight: 800; }
