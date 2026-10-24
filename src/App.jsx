@@ -1591,7 +1591,20 @@ function ContentPage({ data, onRefresh, onOpen, notify }) {
     let alive = true;
     Promise.allSettled([
       adminApi.get(API.banners).then((r) => { const x = normalizeList(r, ["banners", "items"]); if (alive && x[0]) setBanner((v) => ({ ...v, ...x[0] })); }),
-      adminApi.get(API.packages).then((r) => { const x = normalizeList(r, ["packages", "items"]); if (alive && x.length) setPackages(x); }),
+      adminApi.get(API.packages).then((r) => {
+        const x = normalizeList(r, ["packages", "items"]);
+        if (alive && x.length) {
+          const normalized = x.map((p) => {
+            const num = Number(p.priceNumeric ?? String(p.price || '').replace(/[^0-9.]/g, '')) || 0;
+            return {
+              ...p,
+              priceNumeric: num,
+              price: p.price && String(p.price).trim().startsWith('₹') ? String(p.price).trim() : `₹${num}`
+            };
+          });
+          setPackages(normalized);
+        }
+      }),
       adminApi.get(API.reviews).then((r) => { const x = normalizeList(r, ["reviews", "items"]); if (alive && x.length) setReviews(x); }),
       adminApi.get(API.faq).then((r) => { const x = normalizeList(r, ["faq", "items"]); if (alive && x.length) setFaq(x); }),
       adminApi.get(API.primaryContent).then((r) => { const x = r?.data ?? r; if (alive && x && typeof x === "object") setPrimary((v) => ({ ...v, ...x })); }),
@@ -1647,7 +1660,27 @@ function ContentPage({ data, onRefresh, onOpen, notify }) {
       )}
 
       {tab === "banner" && <EditorPanel title="Marketing banner" route={API.banners} fields={[["tag", "Tag"], ["title", "Title"], ["subtitle", "Subtitle"], ["buttonText", "Button text"], ["buttonLink", "Button link/tab"]]} value={banner} setValue={setBanner} onSave={() => save(API.banners, banner, "Marketing banner")} busy={busy} fullWidthKeys={["subtitle"]} />}
-      {tab === "packages" && <CollectionEditor title="Points packages" route={API.packages} items={packages} setItems={setPackages} fields={[["pts", "Points"], ["priceNumeric", "Price"], ["bonus", "Bonus"]]} onSave={(item) => save(String(item.id || "").startsWith("draft_") ? API.packages : API.package(item.id), item, "Package")} busy={busy} notify={notify} />}
+      {tab === "packages" && (
+        <CollectionEditor
+          title="Points packages"
+          route={API.packages}
+          items={packages}
+          setItems={setPackages}
+          fields={[["pts", "Points"], ["priceNumeric", "Price (₹)"], ["bonus", "Bonus"]]}
+          onSave={(item) => {
+            const numPrice = Number(item.priceNumeric ?? String(item.price || '').replace(/[^0-9.]/g, '')) || 0;
+            const formattedPrice = item.price && String(item.price).trim().startsWith('₹') ? String(item.price).trim() : `₹${numPrice}`;
+            const payload = {
+              ...item,
+              priceNumeric: numPrice,
+              price: formattedPrice
+            };
+            return save(String(item.id || "").startsWith("draft_") ? API.packages : API.package(item.id), payload, "Package");
+          }}
+          busy={busy}
+          notify={notify}
+        />
+      )}
       {tab === "reviews" && <CollectionEditor title="Creator reviews" route={API.reviews} items={reviews} setItems={setReviews} fields={[["name", "Name"], ["role", "Role"], ["avatar", "Avatar URL"], ["review", "Review"], ["rating", "Rating"]]} onSave={(item) => save(String(item.id || "").startsWith("draft_") ? API.reviews : API.review(item.id), item, "Review")} busy={busy} notify={notify} />}
       {tab === "faq" && <CollectionEditor title="FAQ" route={API.faq} items={faq} setItems={setFaq} fields={[["question", "Question"], ["answer", "Answer"]]} onSave={(item) => save(String(item.id || "").startsWith("draft_") ? API.faq : API.faqItem(item.id), item, "FAQ")} busy={busy} notify={notify} />}
       {tab === "primary" && (
