@@ -1650,7 +1650,14 @@ function ContentPage({ data, onRefresh, onOpen, notify }) {
       {tab === "packages" && <CollectionEditor title="Points packages" route={API.packages} items={packages} setItems={setPackages} fields={[["pts", "Points"], ["priceNumeric", "Price"], ["bonus", "Bonus"]]} onSave={(item) => save(String(item.id || "").startsWith("draft_") ? API.packages : API.package(item.id), item, "Package")} busy={busy} notify={notify} />}
       {tab === "reviews" && <CollectionEditor title="Creator reviews" route={API.reviews} items={reviews} setItems={setReviews} fields={[["name", "Name"], ["role", "Role"], ["avatar", "Avatar URL"], ["review", "Review"], ["rating", "Rating"]]} onSave={(item) => save(String(item.id || "").startsWith("draft_") ? API.reviews : API.review(item.id), item, "Review")} busy={busy} notify={notify} />}
       {tab === "faq" && <CollectionEditor title="FAQ" route={API.faq} items={faq} setItems={setFaq} fields={[["question", "Question"], ["answer", "Answer"]]} onSave={(item) => save(String(item.id || "").startsWith("draft_") ? API.faq : API.faqItem(item.id), item, "FAQ")} busy={busy} notify={notify} />}
-      {tab === "primary" && <EditorPanel title="Primary / blank content slot" route={API.primaryContent} fields={[["type", "Type: video / text / image / blank"], ["src", "Source URL"], ["title", "Title"], ["text", "Text / body"]]} value={primary} setValue={setPrimary} onSave={() => save(API.primaryContent, primary, "Primary content")} busy={busy} textareaKeys={["text"]} fullWidthKeys={["title"]} />}
+      {tab === "primary" && (
+        <PrimaryContentEditor
+          value={primary}
+          setValue={setPrimary}
+          onSave={(payload) => save(API.primaryContent, payload, "Primary content")}
+          busy={busy}
+        />
+      )}
       {tab === "config" && (
         <ConfigEditor
           config={config}
@@ -1668,6 +1675,144 @@ function ContentPage({ data, onRefresh, onOpen, notify }) {
 
       <div className="notice-strip light"><div className="notice-icon"><Sparkles size={17} /></div><div><strong>Dynamic fallback preserved</strong><span>The customer app already supports text, image, video and safe blank fallback for the primary content slot. Admin changes only change backend responses.</span></div></div>
     </>
+  );
+}
+
+function PrimaryContentEditor({ value, setValue, onSave, busy }) {
+  const currentType = String(value?.type || "image").toLowerCase();
+
+  const handleTypeChange = (newType) => {
+    if (newType === "image" || newType === "video") {
+      setValue({
+        ...value,
+        type: newType,
+        title: "",
+        text: "",
+        src: value.src || ""
+      });
+    } else if (newType === "text") {
+      setValue({
+        ...value,
+        type: "text",
+        src: "",
+        title: value.title || "",
+        text: value.text || ""
+      });
+    } else if (newType === "blank") {
+      setValue({
+        ...value,
+        type: "blank",
+        src: "",
+        title: "",
+        text: ""
+      });
+    }
+  };
+
+  const handleSave = () => {
+    let payload = { type: currentType };
+    if (currentType === "image" || currentType === "video") {
+      payload.src = (value.src || "").trim();
+      payload.title = "";
+      payload.text = "";
+    } else if (currentType === "text") {
+      payload.src = "";
+      payload.title = (value.title || "").trim();
+      payload.text = (value.text || "").trim();
+    } else {
+      payload.src = "";
+      payload.title = "";
+      payload.text = "";
+    }
+    onSave(payload);
+  };
+
+  return (
+    <div className="panel editor-panel">
+      <div className="panel-head">
+        <div>
+          <span className="eyebrow">BACKEND BLOCK</span>
+          <h3>Primary / blank content slot</h3>
+        </div>
+        <code>/admin/content/primary</code>
+      </div>
+
+      <div className="editor-grid">
+        <label className="full-width">
+          <span>Content Slot Type</span>
+          <select
+            value={currentType}
+            onChange={(e) => handleTypeChange(e.target.value)}
+          >
+            <option value="image">Image (Display image via URL)</option>
+            <option value="video">Video (MP4 / WebM stream URL)</option>
+            <option value="text">Text (Headline & Announcement Body)</option>
+            <option value="blank">Blank (Hidden / Off on customer app)</option>
+          </select>
+        </label>
+
+        {(currentType === "image" || currentType === "video") && (
+          <label className="full-width">
+            <span>{currentType === "image" ? "Image Source URL" : "Video Stream URL (MP4 / WebM)"}</span>
+            <input
+              type="text"
+              placeholder={currentType === "image" ? "https://example.com/banner.jpg" : "https://example.com/video.mp4"}
+              value={value?.src ?? ""}
+              onChange={(e) => setValue({ ...value, src: e.target.value, title: "", text: "" })}
+            />
+          </label>
+        )}
+
+        {currentType === "text" && (
+          <>
+            <label className="full-width">
+              <span>Card Title / Headline</span>
+              <input
+                type="text"
+                placeholder="e.g. Special Announcement"
+                value={value?.title ?? ""}
+                onChange={(e) => setValue({ ...value, title: e.target.value, src: "" })}
+              />
+            </label>
+            <label className="full-width">
+              <span>Text / Body Description</span>
+              <textarea
+                rows="4"
+                placeholder="Enter announcement text to show on customer app..."
+                value={value?.text ?? ""}
+                onChange={(e) => setValue({ ...value, text: e.target.value, src: "" })}
+              />
+            </label>
+          </>
+        )}
+
+        {currentType === "blank" && (
+          <div className="full-width" style={{ padding: "14px", background: "#f8fafc", borderRadius: "10px", border: "1px dashed #cbd5e1" }}>
+            <span style={{ fontSize: "11px", color: "#64748b", display: "block" }}>
+              Slot is set to <strong>Blank</strong>. No media, text, or empty placeholder will be rendered on the mobile app.
+            </span>
+          </div>
+        )}
+      </div>
+
+      {currentType === "image" && value?.src && (
+        <div style={{ marginBottom: "16px", borderRadius: "12px", overflow: "hidden", border: "1px solid #e2e8f0", background: "#000", maxHeight: "180px", display: "flex", justifyContent: "center" }}>
+          <img src={value.src} alt="Preview" style={{ maxHeight: "180px", width: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+        </div>
+      )}
+
+      {currentType === "video" && value?.src && (
+        <div style={{ marginBottom: "16px", borderRadius: "12px", overflow: "hidden", border: "1px solid #e2e8f0", background: "#000", maxHeight: "180px", display: "flex", justifyContent: "center" }}>
+          <video controls playsInline style={{ maxHeight: "180px", width: "100%", objectFit: "cover" }}>
+            <source src={value.src} type="video/mp4" />
+          </video>
+        </div>
+      )}
+
+      <button className="button primary" disabled={busy} onClick={handleSave} style={{ marginTop: 8 }}>
+        {busy ? <RefreshCw className="spin" size={15} /> : <CheckCircle2 size={15} />} Save to backend
+      </button>
+    </div>
   );
 }
 
