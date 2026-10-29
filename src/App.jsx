@@ -1007,6 +1007,19 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
   const [editor, setEditor] = useState(null);
   const [rfServicesList, setRfServicesList] = useState([]);
   const [syncingProvider, setSyncingProvider] = useState(false);
+  const [serviceSearch, setServiceSearch] = useState("");
+
+  const filteredRfServices = useMemo(() => {
+    if (!serviceSearch.trim()) return rfServicesList;
+    const q = serviceSearch.toLowerCase().trim();
+    return rfServicesList.filter((s) => {
+      const idMatch = String(s.service || "").toLowerCase().includes(q);
+      const nameMatch = String(s.name || "").toLowerCase().includes(q);
+      const catMatch = String(s.category || "").toLowerCase().includes(q);
+      const rateMatch = String(s.rate || "").toLowerCase().includes(q);
+      return idMatch || nameMatch || catMatch || rateMatch;
+    });
+  }, [rfServicesList, serviceSearch]);
 
   async function handleSyncProvider() {
     setSyncingProvider(true);
@@ -1020,12 +1033,14 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
       // Reload fresh provider services list from backend
       const res = await adminApi.get(API.redfamosaServices);
       const list = normalizeList(res, ["services", "items"]);
-      if (Array.isArray(list)) {
-        setRfServicesList(list);
+      const effectiveList = Array.isArray(list) && list.length ? list : (syncResult?.services || []);
+
+      if (Array.isArray(effectiveList)) {
+        setRfServicesList(effectiveList);
 
         // If a service is selected in the editor, update its fields to latest rates
         if (currentServiceId) {
-          const item = list.find((s) => String(s.service) === String(currentServiceId));
+          const item = effectiveList.find((s) => String(s.service) === String(currentServiceId));
           if (item) {
             setEditor((prev) => ({
               ...prev,
@@ -1041,7 +1056,7 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
           }
         }
       }
-      notify("Provider Synced", syncResult?.message || "Live rates and services synchronized from Red Famosa.");
+      notify("Provider Synced", `Successfully imported ${effectiveList.length} services from Red Famosa.`);
     } catch (err) {
       notify("Sync failed", err.message || "Could not sync with Red Famosa backend.");
     } finally {
@@ -1423,12 +1438,55 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
                     style={{ padding: "3px 8px", fontSize: 11, height: "auto", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}
                     disabled={syncingProvider}
                     onClick={handleSyncProvider}
-                    title="Sync live rates from Red Famosa backend"
+                    title="Import & sync live services from Red Famosa"
                   >
                     <RefreshCw size={12} className={syncingProvider ? "spin" : ""} />
                     {syncingProvider ? "Syncing…" : "Sync"}
                   </button>
                 </div>
+
+                {/* SEARCH INPUT */}
+                <div style={{ position: "relative", marginBottom: 6 }}>
+                  <Search size={12} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "#94a3b8", pointerEvents: "none" }} />
+                  <input
+                    type="text"
+                    style={{
+                      width: "100%",
+                      padding: "5px 24px 5px 26px",
+                      fontSize: 11,
+                      borderRadius: 6,
+                      border: "1px solid #cbd5e1",
+                      background: "#fff",
+                      boxSizing: "border-box"
+                    }}
+                    placeholder="Search by ID (e.g. 3), name, or category..."
+                    value={serviceSearch}
+                    onChange={(e) => setServiceSearch(e.target.value)}
+                  />
+                  {serviceSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setServiceSearch("")}
+                      style={{
+                        position: "absolute",
+                        right: 6,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "transparent",
+                        border: "none",
+                        fontSize: 14,
+                        color: "#94a3b8",
+                        cursor: "pointer",
+                        padding: 0,
+                        lineHeight: 1
+                      }}
+                      title="Clear search"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
                 <select
                   style={{ width: "100%", padding: "6px 8px", fontSize: 11, borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff" }}
                   value={editor.value.providerServiceId || ""}
@@ -1458,13 +1516,26 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
                     }
                   }}
                 >
-                  <option value="">Select Red Famosa service to auto-fill...</option>
-                  {rfServicesList.map((s) => (
+                  <option value="">
+                    {filteredRfServices.length === 0 ? "No services match your search" : "Select Red Famosa service to auto-fill..."}
+                  </option>
+                  {filteredRfServices.map((s) => (
                     <option key={s.service} value={s.service}>
                       [{s.service}] {s.name} — Rate: ₹{s.rate}
                     </option>
                   ))}
                 </select>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                  <small style={{ fontSize: 10, color: "#64748b" }}>
+                    {filteredRfServices.length} of {rfServicesList.length} services loaded
+                  </small>
+                  {editor.value.providerServiceId && (
+                    <small style={{ fontSize: 10, color: "#16a34a", fontWeight: 600 }}>
+                      ✓ Mapped to #{editor.value.providerServiceId}
+                    </small>
+                  )}
+                </div>
               </div>
             )}
 
