@@ -1669,7 +1669,7 @@ function ContentPage({ data, onRefresh, onOpen, notify }) {
           fields={[["pts", "Points"], ["priceNumeric", "Price (₹)"], ["bonus", "Bonus"]]}
           onSave={(item) => {
             const numPrice = Number(item.priceNumeric ?? String(item.price || '').replace(/[^0-9.]/g, '')) || 0;
-            const formattedPrice = item.price && String(item.price).trim().startsWith('₹') ? String(item.price).trim() : `₹${numPrice}`;
+            const formattedPrice = `₹${numPrice}`;
             const payload = {
               ...item,
               priceNumeric: numPrice,
