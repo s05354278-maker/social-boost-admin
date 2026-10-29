@@ -287,7 +287,10 @@ function statusTone(status) {
     Connected: "green",
     Processing: "amber",
     Pending: "amber",
+    "In Progress": "amber",
     Partial: "purple",
+    Cancelled: "slate",
+    Canceled: "slate",
     Failed: "red",
     Blocked: "red",
     Draft: "slate",
@@ -981,8 +984,10 @@ function OrdersPage({ data, onRefresh, notify, onOrderUpdated }) {
                   >
                     <option value="Pending">Pending</option>
                     <option value="Processing">Processing</option>
+                    <option value="In Progress">In Progress</option>
                     <option value="Completed">Completed</option>
                     <option value="Partial">Partial</option>
+                    <option value="Cancelled">Cancelled</option>
                     <option value="Failed">Failed</option>
                   </select>
                 </td>
