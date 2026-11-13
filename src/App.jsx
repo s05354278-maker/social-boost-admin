@@ -1674,9 +1674,15 @@ function ContentPage({ data, onRefresh, onOpen, notify }) {
             const num = Number(p.priceNumeric ?? String(p.price || '').replace(/[^0-9.]/g, '')) || 0;
             return {
               ...p,
+              pts: String(p.pts || ''),
               priceNumeric: num,
               price: p.price && String(p.price).trim().startsWith('₹') ? String(p.price).trim() : `₹${num}`
             };
+          });
+          normalized.sort((a, b) => {
+            const numA = parseInt(String(a.id || '').replace(/\D/g, ''), 10) || 0;
+            const numB = parseInt(String(b.id || '').replace(/\D/g, ''), 10) || 0;
+            return numA - numB;
           });
           setPackages(normalized);
         }
@@ -1742,7 +1748,7 @@ function ContentPage({ data, onRefresh, onOpen, notify }) {
           route={API.packages}
           items={packages}
           setItems={setPackages}
-          fields={[["pts", "Points"], ["priceNumeric", "Price (₹)"], ["bonus", "Bonus"]]}
+          fields={[["id", "Product ID (e.g. pkg_1)"], ["pts", "Points"], ["priceNumeric", "Price (₹)"], ["bonus", "Bonus"]]}
           onSave={(item) => {
             const numPrice = Number(item.priceNumeric ?? String(item.price || '').replace(/[^0-9.]/g, '')) || 0;
             const formattedPrice = `₹${numPrice}`;
@@ -1956,29 +1962,49 @@ function EditorPanel({ title, route, fields, value, setValue, onSave, busy, text
 }
 
 function CollectionEditor({ title, route, items, setItems, fields, onSave, busy, notify }) {
-  function update(id, key, val) { setItems(items.map((x) => x.id === id ? { ...x, [key]: val } : x)); }
-  function add() { setItems([...items, { id: `draft_${Date.now()}`, ...Object.fromEntries(fields.map(([k]) => [k, ""])) }]); }
-  async function remove(id) {
+  function update(idx, key, val) {
+    setItems((prev) => prev.map((x, i) => i === idx ? { ...x, [key]: val, ...(key === "id" ? { id: val } : {}) } : x));
+  }
+
+  function add() {
+    let nextId = `draft_${Date.now()}`;
+    if (title.toLowerCase().includes("package")) {
+      const existingNums = items
+        .map((x) => {
+          const m = String(x.id || "").match(/^pkg_(\d+)$/);
+          return m ? parseInt(m[1], 10) : null;
+        })
+        .filter((n) => n !== null && !isNaN(n));
+      const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : (items.length + 1);
+      nextId = `pkg_${nextNum}`;
+    }
+    setItems([...items, { id: nextId, ...Object.fromEntries(fields.map(([k]) => [k, k === "id" ? nextId : ""])) }]);
+  }
+
+  async function remove(idx, id) {
     if (String(id).startsWith("draft_")) {
-      setItems(items.filter((x) => x.id !== id));
+      setItems((prev) => prev.filter((_, i) => i !== idx));
       return;
     }
     try {
       await adminApi.remove(`${route}/${encodeURIComponent(id)}`);
-      setItems(items.filter((x) => x.id !== id));
+      setItems((prev) => prev.filter((_, i) => i !== idx));
       if (notify) notify("Deleted", `${title.slice(0, -1)} removed successfully.`);
     } catch {
-      setItems(items.filter((x) => x.id !== id));
+      setItems((prev) => prev.filter((_, i) => i !== idx));
     }
   }
 
-  async function handleSaveItem(item) {
+  async function handleSaveItem(item, idx) {
     if (checkDebounce('handleSaveItem')) return;
     try {
       const res = await onSave(item);
       const saved = res?.package || res?.review || res?.faq || res?.data || res;
       if (saved && saved.id) {
-        setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, ...saved } : x));
+        setItems((prev) => prev.map((x, i) => i === idx ? { ...x, ...saved } : x));
+      }
+      if (res?.packages && Array.isArray(res.packages)) {
+        setItems(res.packages);
       }
     } catch {
       // notification already dispatched by onSave
@@ -1999,7 +2025,7 @@ function CollectionEditor({ title, route, items, setItems, fields, onSave, busy,
                 <strong>{item.name || item.question || (item.pts ? `${item.pts} Points Pack` : `Item #${idx + 1}`)}</strong>
                 <span className="collection-badge">{item.id}</span>
               </div>
-              <button className="button danger" style={{ padding: "4px 8px", fontSize: 10 }} onClick={() => remove(item.id)} title="Remove item">
+              <button className="button danger" style={{ padding: "4px 8px", fontSize: 10 }} onClick={() => remove(idx, item.id)} title="Remove item">
                 <Trash2 size={13} />
               </button>
             </div>
@@ -2010,15 +2036,15 @@ function CollectionEditor({ title, route, items, setItems, fields, onSave, busy,
                   <label key={key} className={isBig ? "full-width" : ""}>
                     <span>{label}</span>
                     {isBig ? (
-                      <textarea rows="3" value={item[key] ?? ""} onChange={(e) => update(item.id, key, e.target.value)} />
+                      <textarea rows="3" value={item[key] ?? ""} onChange={(e) => update(idx, key, e.target.value)} />
                     ) : (
-                      <input value={item[key] ?? ""} onChange={(e) => update(item.id, key, e.target.value)} />
+                      <input value={item[key] ?? ""} onChange={(e) => update(idx, key, e.target.value)} />
                     )}
                   </label>
                 );
               })}
             </div>
-            <button className="button primary" disabled={busy} onClick={() => handleSaveItem(item)} style={{ marginTop: 6 }}>
+            <button className="button primary" disabled={busy} onClick={() => handleSaveItem(item, idx)} style={{ marginTop: 6 }}>
               <CheckCircle2 size={14} /> Save {title.slice(0, -1)}
             </button>
           </div>
