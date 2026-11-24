@@ -47,6 +47,14 @@ import {
   CreditCard as CreditCard2,
   ShieldAlert,
   Trash2,
+  Timer,
+  Clock,
+  PlayCircle,
+  PauseCircle,
+  Key,
+  Eye,
+  EyeOff,
+  AlertTriangle,
   X,
   XCircle,
   Zap,
@@ -155,6 +163,8 @@ const API = {
   redfamosaStatus: "/admin/redfamosa/status",
   redfamosaServices: "/admin/redfamosa/services",
   redfamosaSync: "/admin/redfamosa/sync",
+  redfamosaSchedule: "/admin/redfamosa/schedule",
+  redfamosaCredentials: "/admin/redfamosa/credentials",
   redfamosaBalance: "/admin/redfamosa/balance",
   redfamosaCrmStatus: "/admin/redfamosa/crm/status",
   redfamosaChannels: "/admin/redfamosa/crm/channels",
@@ -493,9 +503,11 @@ function SocialBoostAdmin({ onLogout }) {
     setSyncing(true);
     try {
       const result = await apiFetch(API.redfamosaSync, { method: "POST", body: JSON.stringify({ scope: "services,status,balance" }) });
-      notify("Red Famosa sync started", result?.message || "Your backend accepted the synchronization request.");
+      notify("Red Famosa sync complete", result?.message || "Catalog and provider rates synchronized successfully.");
+      return result;
     } catch (error) {
       notify("Sync unavailable", error.message || "Connect your backend integration first.");
+      throw error;
     } finally {
       setSyncing(false);
     }
@@ -1144,7 +1156,7 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
       variant: selectedVariant,
       value:
         type === "service"
-          ? { name: "", category: "Instagram", displayLayout: "row", iconName: "Sparkles", iconUrl: "", status: "Active" }
+          ? { name: "", category: "Instagram", displayLayout: "row", iconName: "Sparkles", iconUrl: "", descriptionImageUrl: "", status: "Active" }
           : type === "variant"
           ? { name: "", title: "", speed: "Instant (0–15m)", exampleLink: "https://example.com", iconName: "Sparkles", descriptionImageUrl: "", status: "Active" }
           : { name: "", price: 100, min: "100", max: "10000", guarantee: "Verified Audience Retention", descriptionImageUrl: "", providerServiceId: "", rfPrice: "", status: "Active" }
@@ -1153,6 +1165,9 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
 
   function openEdit(type, value) {
     const cleanValue = { ...value };
+    if (type === "service") {
+      cleanValue.descriptionImageUrl = cleanValue.descriptionImageUrl || cleanValue.imageUrl || "";
+    }
     if (type === "variant") {
       delete cleanValue.priceLabel;
       delete cleanValue.price;
@@ -1270,8 +1285,8 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
 
       <div className="notice-strip">
         <div className="notice-icon"><Boxes size={17} /></div>
-        <div><strong>Three-level customer catalogue</strong><span>Service grid → variant grid → sub-variant grid. Add or edit any level here; the customer app reads the resulting hierarchy from GET /api/services.</span></div>
-        <span className="backend-badge">A → B → C READY</span>
+        <div><strong>Three-level customer catalogue</strong><span>Service grid → variant grid → sub-variant grid. Prices, min/max limits and provider availability auto-sync 3x daily (every 8 hours) with Red Famosa directly to the app.</span></div>
+        <span className="backend-badge" style={{ background: '#dcfce7', color: '#15803d', borderColor: '#bbf7d0' }}>3x DAILY AUTO-SYNC</span>
       </div>
 
       <div className="ui-tabs">
@@ -1562,12 +1577,34 @@ function ServicesPage({ data, onRefresh, onOpen, notify }) {
                     <div>
                       <input
                         value={val || ""}
-                        placeholder="Paste image link for order page..."
+                        placeholder="Paste direct image link (e.g. https://i.ibb.co/... or https://i.postimg.cc/...)"
                         onChange={(e) => setEditor((v) => ({ ...v, value: { ...v.value, [key]: e.target.value } }))}
                       />
+                      {val && val.includes("ibb.co/") && !val.includes("i.ibb.co/") && (
+                        <p style={{ fontSize: 11, color: "#e11d48", marginTop: 4, lineHeight: 1.4 }}>
+                          ⚠️ <strong>Viewer link detected!</strong> ImgBB webpage links (<code>ibb.co/...</code>) won't load. Right-click the image on ImgBB and select <strong>"Copy image address"</strong> (starts with <code>https://i.ibb.co/...</code>).
+                        </p>
+                      )}
                       {val && (
                         <div style={{ marginTop: 6, borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0", background: "#000", textAlign: "center" }}>
-                          <img src={val} alt="preview" style={{ maxHeight: 110, width: "100%", objectFit: "contain" }} />
+                          <img
+                            src={val}
+                            alt="preview"
+                            style={{ maxHeight: 260, width: "100%", objectFit: "contain" }}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                              const parent = e.currentTarget.parentElement;
+                              if (parent && !parent.querySelector('.err-msg')) {
+                                const msg = document.createElement('div');
+                                msg.className = 'err-msg';
+                                msg.style.color = '#f87171';
+                                msg.style.padding = '12px';
+                                msg.style.fontSize = '11px';
+                                msg.innerText = 'Unable to load image. Make sure the link is a direct image URL (ends with .jpg/.png or starts with i.ibb.co)';
+                                parent.appendChild(msg);
+                              }
+                            }}
+                          />
                         </div>
                       )}
                     </div>
@@ -2111,39 +2148,402 @@ function ConfigEditor({ config, setConfig, onSave, busy }) {
 }
 
 function RedFamosaPage({ onSync, syncing, onRefresh, notify }) {
-  const [rfStatus, setRfStatus] = useState({ connected: true, latency: 218, balance: "₹12,840", lastSync: "2 min ago" });
+  const [rfStatus, setRfStatus] = useState({
+    connected: false,
+    latency: 0,
+    balance: "₹0",
+    lastSync: null,
+    nextSync: null,
+    autoSyncEnabled: true,
+    intervalHours: 8,
+    scheduleLabel: "3 times a day (Every 8 hours)",
+    syncedCount: 0,
+    hasKey: false,
+    maskedKey: "",
+    lastError: null
+  });
+  const [credentials, setCredentials] = useState({
+    apiUrl: "https://socialsmm.duckdns.org/api/v2",
+    hasKey: false,
+    maskedKey: "",
+    connected: false,
+    lastError: null
+  });
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [apiUrlInput, setApiUrlInput] = useState("https://socialsmm.duckdns.org/api/v2");
+  const [showKey, setShowKey] = useState(false);
+  const [savingCreds, setSavingCreds] = useState(false);
+
+  const [countdown, setCountdown] = useState("--");
+  const [selectedInterval, setSelectedInterval] = useState(8);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const [statusRes, credRes] = await Promise.allSettled([
+        apiFetch(API.redfamosaStatus),
+        apiFetch(API.redfamosaCredentials)
+      ]);
+      if (statusRes.status === "fulfilled" && statusRes.value) {
+        setRfStatus((prev) => ({ ...prev, ...statusRes.value }));
+        if (statusRes.value.intervalHours) {
+          setSelectedInterval(statusRes.value.intervalHours);
+        }
+      }
+      if (credRes.status === "fulfilled" && credRes.value) {
+        setCredentials(credRes.value);
+        if (credRes.value.apiUrl) setApiUrlInput(credRes.value.apiUrl);
+      }
+    } catch (e) {
+      console.warn("Failed to fetch redfamosa status:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
+  useEffect(() => {
+    function updateCountdown() {
+      if (!rfStatus.nextSync || !rfStatus.autoSyncEnabled) {
+        setCountdown(rfStatus.autoSyncEnabled ? "--" : "Paused");
+        return;
+      }
+      const diff = new Date(rfStatus.nextSync).getTime() - Date.now();
+      if (diff <= 0) {
+        setCountdown("Due now (syncing)");
+        return;
+      }
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const secs = Math.floor((diff % (1000 * 60)) / 1000);
+      setCountdown(`${hours}h ${mins}m ${secs}s`);
+    }
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 1000);
+    return () => clearInterval(timer);
+  }, [rfStatus.nextSync, rfStatus.autoSyncEnabled]);
 
   async function checkConnection() {
+    setTestingConnection(true);
     try {
-      await apiFetch(API.redfamosaStatus);
-      setRfStatus((v) => ({ ...v, connected: true, lastSync: "just now" }));
+      const data = await apiFetch(API.redfamosaStatus);
+      setRfStatus((prev) => ({ ...prev, ...data, connected: true }));
       notify("Connection verified", "Your backend can reach the Red Famosa connector.");
     } catch (error) {
       setRfStatus((v) => ({ ...v, connected: false }));
       notify("Connection check failed", error.message || "Verify the backend connector.");
+    } finally {
+      setTestingConnection(false);
     }
   }
 
+  async function handleSaveCredentials(e) {
+    if (e) e.preventDefault();
+    if (!apiKeyInput.trim()) {
+      notify("API Key required", "Please paste your Red Famosa API Key from socialsmm.duckdns.org");
+      return;
+    }
+    setSavingCreds(true);
+    try {
+      const res = await apiFetch(API.redfamosaCredentials, {
+        method: "POST",
+        body: JSON.stringify({
+          apiKey: apiKeyInput.trim(),
+          apiUrl: apiUrlInput.trim()
+        })
+      });
+      if (res?.success) {
+        notify("Connected to Red Famosa!", res.message || `Found ${res.servicesCount} live services.`);
+        setApiKeyInput("");
+        await fetchStatus();
+      } else {
+        notify("Connection failed", res?.error || "Invalid API Key or API is disabled in Red Famosa.");
+      }
+    } catch (err) {
+      notify("Connection failed", err.message || "Could not reach Red Famosa with this API key.");
+    } finally {
+      setSavingCreds(false);
+    }
+  }
+
+  async function handleSaveSchedule(newHours, newEnabled) {
+    setSavingSchedule(true);
+    try {
+      const payload = {
+        intervalHours: Number(newHours !== undefined ? newHours : selectedInterval),
+        enabled: newEnabled !== undefined ? Boolean(newEnabled) : Boolean(rfStatus.autoSyncEnabled)
+      };
+      const res = await apiFetch(API.redfamosaSchedule, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      if (res?.schedule) {
+        setRfStatus((prev) => ({
+          ...prev,
+          ...res.schedule,
+          autoSyncEnabled: res.schedule.enabled
+        }));
+      }
+      notify("Schedule updated", res?.message || "Auto-sync timer schedule updated.");
+    } catch (err) {
+      notify("Schedule update failed", err.message || "Failed to save auto-sync configuration.");
+    } finally {
+      setSavingSchedule(false);
+    }
+  }
+
+  async function handleManualSync() {
+    try {
+      await onSync();
+      await fetchStatus();
+    } catch (err) {
+      // Handled by onSync
+    }
+  }
+
+  function formatSyncTime(isoStr) {
+    if (!isoStr) return "Never";
+    try {
+      const d = new Date(isoStr);
+      if (isNaN(d.getTime())) return isoStr;
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + " (" + d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ")";
+    } catch {
+      return isoStr;
+    }
+  }
+
+  const isLiveConnected = Boolean(rfStatus.connected && credentials.connected && !rfStatus.lastError);
+
   return (
     <>
-      <SectionTitle eyebrow="EXTERNAL ENGINE" title="Red Famosa bridge" description="Monitor the API bridge. Keep Red Famosa's credentials and provider logic on your backend." action={<div className="button-group"><button className="button secondary" onClick={checkConnection}><Activity size={16} /> Test connection</button><button className="button primary" onClick={onSync} disabled={syncing}>{syncing ? <RefreshCw className="spin" size={16} /> : <RefreshCw size={16} />} Sync</button></div>} />
+      <SectionTitle
+        eyebrow="EXTERNAL ENGINE"
+        title="Red Famosa bridge & Auto-Sync"
+        description="Monitor the API bridge and manage background synchronization. All credentials and automated timers stay secure on your backend."
+        action={
+          <div className="button-group">
+            <button className="button secondary" onClick={checkConnection} disabled={testingConnection}>
+              {testingConnection ? <RefreshCw className="spin" size={16} /> : <Activity size={16} />}
+              Test connection
+            </button>
+            <button className="button primary" onClick={handleManualSync} disabled={syncing}>
+              {syncing ? <RefreshCw className="spin" size={16} /> : <RefreshCw size={16} />}
+              Sync Now
+            </button>
+          </div>
+        }
+      />
+
+      {/* Hero Stats */}
       <div className="rf-hero panel">
-        <div className="rf-brand"><div className="rf-logo"><Link2 size={24} /></div><div><strong>Red Famosa API</strong><span>External fulfillment engine</span></div></div>
-        <StatusPill status={rfStatus.connected ? "Connected" : "Failed"} />
+        <div className="rf-brand">
+          <div className="rf-logo"><Link2 size={24} /></div>
+          <div>
+            <strong>Red Famosa API</strong>
+            <span>External fulfillment engine & automated rates distributor</span>
+          </div>
+        </div>
+        <StatusPill status={isLiveConnected ? "Connected" : (rfStatus.connected ? "Connected" : "Action Needed")} />
         <div className="rf-stat-grid">
-          <div><span>Connection</span><strong>{rfStatus.connected ? "Healthy" : "Offline"}</strong></div>
+          <div><span>Connection</span><strong>{isLiveConnected ? "Live Connected" : "Needs API Key"}</strong></div>
           <div><span>API latency</span><strong>{rfStatus.latency} ms</strong></div>
           <div><span>Provider balance</span><strong>{rfStatus.balance}</strong></div>
-          <div><span>Last sync</span><strong>{rfStatus.lastSync}</strong></div>
+          <div><span>Auto-Sync Schedule</span><strong>{rfStatus.scheduleLabel || "3x daily (8h)"}</strong></div>
         </div>
       </div>
+
+      {/* Live Provider API Credentials Manager */}
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-head">
+          <div>
+            <span className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4f46e5' }}>
+              <Key size={14} /> PROVIDER CREDENTIALS
+            </span>
+            <h3 style={{ marginTop: 2 }}>Red Famosa API Credentials & Live Services</h3>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
+              Connect your live Red Famosa API key to automatically fetch and sync all real services (LinkedIn, Spotify, YouTube, Instagram, etc.).
+            </p>
+          </div>
+        </div>
+
+        {/* Status Callout Banner */}
+        {rfStatus.lastError || !credentials.hasKey ? (
+          <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', borderRadius: 8, padding: '12px 14px', marginTop: 14, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <AlertTriangle size={18} style={{ color: '#d97706', flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: 12, color: '#92400e', lineHeight: 1.5 }}>
+              <strong>API Key Required or Inactive:</strong>
+              <div>{rfStatus.lastError ? `Red Famosa response: "${rfStatus.lastError}"` : "Please enter your Red Famosa API Key below to unlock live services."}</div>
+              <div style={{ marginTop: 6, color: '#78350f', fontSize: 11 }}>
+                👉 <strong>How to find your key:</strong> On <strong>socialsmm.duckdns.org</strong>, click your username <strong>Shabbir</strong> (top right) or go to <strong>Account / API</strong>, copy your <strong>API Key</strong> (make sure API status is <em>Active</em>), and paste it below.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginTop: 14, display: 'flex', gap: 10, alignItems: 'center' }}>
+            <CheckCircle2 size={16} style={{ color: '#16a34a', flexShrink: 0 }} />
+            <div style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>
+              Live Provider Connected & Active ({credentials.maskedKey || "Key Verified"}) — Real services and prices are directly synchronized.
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveCredentials} style={{ marginTop: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1.8fr)', gap: 12 }}>
+            <label style={{ margin: 0 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>API URL</span>
+              <input
+                value={apiUrlInput}
+                onChange={(e) => setApiUrlInput(e.target.value)}
+                placeholder="https://socialsmm.duckdns.org/api/v2"
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--line)', fontSize: 12 }}
+              />
+            </label>
+            <label style={{ margin: 0 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>Master API Key</span>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input
+                  type={showKey ? "text" : "password"}
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder={credentials.hasKey ? `Key saved (${credentials.maskedKey}) — enter new key to replace` : "Paste your Red Famosa API Key here..."}
+                  style={{ width: '100%', padding: '8px 36px 8px 10px', borderRadius: 8, border: '1px solid var(--line)', fontSize: 12 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  style={{ position: 'absolute', right: 8, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 4 }}
+                  title={showKey ? "Hide key" : "Show key"}
+                >
+                  {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+            <button
+              type="submit"
+              className="button primary"
+              disabled={savingCreds || !apiKeyInput.trim()}
+              style={{ padding: '8px 16px', fontSize: 12 }}
+            >
+              {savingCreds ? <RefreshCw className="spin" size={14} /> : <Key size={14} />}
+              {savingCreds ? "Connecting to Red Famosa..." : "Save & Connect API Key"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Automated 3x Daily Auto-Sync Timer Card */}
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <span className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4f46e5' }}>
+              <Timer size={14} /> AUTOMATED PROVIDER TIMER
+            </span>
+            <h3 style={{ marginTop: 2 }}>3x Daily Catalog, Rate & Min/Max Auto-Sync</h3>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
+              The server fetches fresh service prices, min/max limits, and availability from Red Famosa every 8 hours and updates the mobile app automatically.
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className={`status-pill ${rfStatus.autoSyncEnabled ? "success" : "neutral"}`}>
+              <span className="dot" />
+              {rfStatus.autoSyncEnabled ? "Timer Active" : "Timer Paused"}
+            </span>
+          </div>
+        </div>
+
+        <div className="rf-stat-grid" style={{ marginTop: 14 }}>
+          <div>
+            <span>Timer Status</span>
+            <strong style={{ color: rfStatus.autoSyncEnabled ? '#16a34a' : '#64748b' }}>
+              {rfStatus.autoSyncEnabled ? "Active (Every 8h)" : "Paused"}
+            </strong>
+            <small style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 3 }}>
+              {rfStatus.autoSyncEnabled ? "Runs 3x daily in backend" : "Automated trigger suspended"}
+            </small>
+          </div>
+          <div>
+            <span>Next Auto-Sync In</span>
+            <strong style={{ color: '#4f46e5', fontFamily: 'monospace', letterSpacing: '0.02em' }}>{countdown}</strong>
+            <small style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 3 }}>
+              {rfStatus.nextSync ? formatSyncTime(rfStatus.nextSync) : "Pending"}
+            </small>
+          </div>
+          <div>
+            <span>Last Auto-Sync</span>
+            <strong>{formatSyncTime(rfStatus.lastSync)}</strong>
+            <small style={{ fontSize: 11, color: '#16a34a', display: 'block', marginTop: 3, fontWeight: 600 }}>
+              {rfStatus.syncedCount !== undefined ? `✓ ${rfStatus.syncedCount} sub-variants synced` : "Catalog synchronized"}
+            </small>
+          </div>
+          <div>
+            <span>Customer App Updates</span>
+            <strong style={{ color: '#16a34a' }}>Live Instant</strong>
+            <small style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 3 }}>
+              Served via GET /api/services
+            </small>
+          </div>
+        </div>
+
+        {/* Schedule Controls */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+              <Clock size={15} style={{ color: '#4f46e5' }} />
+              <span>Interval:</span>
+              <select
+                value={selectedInterval}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setSelectedInterval(val);
+                  handleSaveSchedule(val, rfStatus.autoSyncEnabled);
+                }}
+                disabled={savingSchedule}
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--line)', background: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              >
+                <option value={8}>3 times a day (Every 8 hours) - Default</option>
+                <option value={12}>2 times a day (Every 12 hours)</option>
+                <option value={24}>Once a day (Every 24 hours)</option>
+                <option value={4}>6 times a day (Every 4 hours)</option>
+              </select>
+            </label>
+
+            <button
+              className="button secondary"
+              onClick={() => handleSaveSchedule(selectedInterval, !rfStatus.autoSyncEnabled)}
+              disabled={savingSchedule}
+              style={{ padding: '6px 14px', fontSize: 12 }}
+            >
+              {rfStatus.autoSyncEnabled ? <PauseCircle size={14} /> : <PlayCircle size={14} />}
+              {rfStatus.autoSyncEnabled ? "Pause Schedule" : "Resume Schedule"}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              className="button primary"
+              onClick={handleManualSync}
+              disabled={syncing}
+              style={{ padding: '7px 16px', fontSize: 12 }}
+            >
+              {syncing ? <RefreshCw className="spin" size={14} /> : <RefreshCw size={14} />}
+              Sync Now & Reset Timer
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="rf-grid">
         <div className="panel">
-          <div className="panel-head"><div><span className="eyebrow">API DATA</span><h3>Data your backend can sync</h3></div></div>
+          <div className="panel-head"><div><span className="eyebrow">API DATA</span><h3>Data your backend syncs automatically</h3></div></div>
           <div className="rf-list">
-            <RFItem icon={Boxes} title="Services + self-dispatch" text="Catalogue, markup, provider mappings, drip-feed, refill, cancel and subscription lifecycle controls." />
-            <RFItem icon={Package} title="Order queue" text="Provider order IDs, statuses, retries, ageing checks and circuit-breaker state." />
-            <RFItem icon={Wallet} title="Wallet ledger" text="Top-ups, bonuses, corrections, refunds and order debits as auditable entries." />
+            <RFItem icon={Boxes} title="Services & Live Rates" text="Catalogue, provider mappings, rates, min and max order limits updated 3x daily." />
+            <RFItem icon={Package} title="Order queue & fulfillment" text="Provider order IDs, statuses, auto-retries, and completion tracking." />
+            <RFItem icon={Wallet} title="Wallet ledger" text="Top-ups, bonuses, corrections, refunds and provider debits as auditable entries." />
             <RFItem icon={MessageCircle} title="Omnichannel CRM" text="WhatsApp, Messenger, Instagram, Telegram, email, web chat and customer tickets." />
             <RFItem icon={Bot} title="AI + knowledge base" text="AI-agent configuration and knowledge-source management through backend contracts." />
             <RFItem icon={Network} title="Branded reseller panels" text="Child-panel branding, feature plans, domains, recurring billing and suspension lifecycle." />
@@ -2151,12 +2551,19 @@ function RedFamosaPage({ onSync, syncing, onRefresh, notify }) {
         </div>
         <div className="panel">
           <div className="panel-head"><div><span className="eyebrow">BACKEND BLOCKS</span><h3>Integration contracts</h3></div></div>
-          <div className="code-list"><code>GET {API.redfamosaStatus}</code><code>GET {API.redfamosaServices}</code><code>GET {API.redfamosaBalance}</code><code>POST {API.redfamosaSync}</code></div>
+          <div className="code-list">
+            <code>GET {API.redfamosaStatus}</code>
+            <code>GET {API.redfamosaSchedule}</code>
+            <code>POST {API.redfamosaSchedule}</code>
+            <code>GET {API.redfamosaServices}</code>
+            <code>GET {API.redfamosaBalance}</code>
+            <code>POST {API.redfamosaSync}</code>
+          </div>
           <div className="security-note"><Lock size={16} /><span>Never expose the Red Famosa API key to the browser or mobile app.</span></div>
-          <button className="full-button" onClick={onRefresh}><FileClock size={15} /> Refresh bridge health</button>
+          <button className="full-button" onClick={() => { onRefresh(); fetchStatus(); }}><FileClock size={15} /> Refresh bridge health</button>
         </div>
       </div>
-      <div className="notice-strip light"><div className="notice-icon"><AlertCircle size={17} /></div><div><strong>Integration boundary</strong><span>This UI intentionally does not implement the Red Famosa internal payment flow. Your backend should handle your payment gateway separately, then call only the documented provider-side API action that your Red Famosa setup supports.</span></div><button className="text-button" onClick={() => notify("Integration note", "Keep undocumented database writes out of the frontend.")}>Read rule</button></div>
+      <div className="notice-strip light"><div className="notice-icon"><AlertCircle size={17} /></div><div><strong>Zero App Downtime</strong><span>All pricing, minimum, and maximum order boundaries update seamlessly in the backend database. Mobile app clients immediately receive updated numbers on next request without needing an app store update.</span></div><button className="text-button" onClick={() => notify("Auto-sync note", "Rates & limits are cached in memory and saved to disk.")}>Learn more</button></div>
     </>
   );
 }
